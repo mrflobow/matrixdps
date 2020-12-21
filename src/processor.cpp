@@ -25,3 +25,22 @@ uint16_t* process_to_rg566bmp(const uint8_t* rgba,unsigned int height,unsigned i
 
       return b565;
 }
+
+uint16_t hex2rgb565(const char* str)
+{
+   String hexstr = String(str);
+   if (hexstr.startsWith("#")){
+        hexstr = hexstr.substring(1);
+   }
+   int hex = strtol(hexstr.c_str(),0,16);
+   uint8_t r8 = ((hex >> 16) & 0xFF);  // Extract the RR byte
+   uint8_t g8 = ((hex >> 8) & 0xFF);   // Extract the GG byte
+   uint8_t b8 = ((hex) & 0xFF);        // Extract the BB byte
+
+
+   uint16_t b = (b8 >> 3) & 0x1f;
+   uint16_t g = ((g8 >> 2) & 0x3f) << 5;
+   uint16_t r = ((r8 >> 3) & 0x1f) << 11;
+   uint16_t b565 =  (r | g | b);
+   return b565;
+}

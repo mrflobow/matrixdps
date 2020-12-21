@@ -989,7 +989,6 @@ upng_error upng_decode(upng_t* upng)
 	unsigned long compressed_size = 0, compressed_index = 0;
 	unsigned long inflated_size;
 	upng_error error;
-	Serial.printf("\n decode");
 	/* if we have an error state, bail now */
 	if (upng->error != UPNG_EOK) {
 		return upng->error;
@@ -1192,7 +1191,7 @@ upng_t* upng_new_from_file(const char *filename)
 
 	//file = fopen(filename, "rb");
 	file = SPIFFS.open(filename, "r");
-	if (file == NULL) {
+	if (!file) {
 		SET_ERROR(upng, UPNG_ENOTFOUND);
 		return upng;
 	}
