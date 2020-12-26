@@ -9,6 +9,7 @@
 #include <Adafruit_GFX.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <Fonts/Picopixel.h>
+#include <PubSubClient.h>
 //OWN LIBS
 #include "base64.hpp" 
 #include "upng.h"
@@ -18,103 +19,33 @@
 
 
 MatrixPanel_I2S_DMA dma_display;
-WiFiServer server(TCP_SERVER_PORT);
+WiFiClient esp_client;
+PubSubClient mqtt_client(esp_client);
+char SUBSCRIBE_CMND[255];
+char STATUS_TOPIC[255];
 
-
-
-
-void setup_wifi()
-{
-    delay(10);
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(SSID);
- 
-    WiFi.begin(SSID, PSK);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
- 
-    Serial.println("");
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-    server.begin();
-}
-
-void setup_display(){
-    dma_display.begin(); 
-    
-  // fix the screen with green
-    dma_display.fillRect(0, 0, dma_display.width(), dma_display.height(), dma_display.color444(255, 0, 0));
-    delay(500);
-
-
-    // draw a box in yellow
-    dma_display.fillRect(0, 0, dma_display.width(), dma_display.height(), dma_display.color444(0, 255, 0));
-    delay(500);
-
-    dma_display.fillRect(0, 0, dma_display.width(), dma_display.height(), dma_display.color444(0, 0, 255));
-    delay(500);
-}
-
-void setup() {
-  Serial.begin(115200);
-  setup_wifi();
-
-   if(!SPIFFS.begin(true)){
-    Serial.println("An Error has occurred while mounting SPIFFS");
-    return;
-  }
-
-  setup_display();
- 
- 
-}
-
-void handle_dpx(const char* args,WiFiClient* client)
+void handle_dpx(const char* args)
 {
   int pos_x,pos_y;
   int col_r,col_b,col_g;
   if(sscanf(args,"%d %d %d %d %d",&pos_x,&pos_y,&col_r,&col_b,&col_g) < 1){
-    client->println("ERR PARAMS PARSING FAILED ");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PARAMS PARSING FAILED");
     return;
-  }
-
-  if(pos_x < 0){
-      client->println("ERR POS_X is negative");
-      return;
-  }
-
-  if(pos_y < 0){
-      client->println("ERR POS_Y is negative");
-      return;
   }
 
   dma_display.drawPixelRGB888(pos_x,pos_y,col_r,col_g,col_b);
 }
 
-void handle_lpic(char* args,WiFiClient* client){
+void handle_lpic(char* args){
   int slot,pos_x,pos_y;
 
    if(sscanf(args,"%d %d %d",&slot,&pos_x,&pos_y) < 1){
-    client->println("ERR PARAMS PARSING FAILED ");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PARAMS PARSING FAILED");
     return;
   }
 
   if(slot < 0 || slot > MAX_SLOTS){
-      client->println("ERR SLOT OUT OF RANGE");
-      return;
-  }
-
-  if(pos_x < 0){
-      client->println("ERR POS_X is negative");
-      return;
-  }
-
-  if(pos_y < 0){
-      client->println("ERR POS_Y is negative");
+      mqtt_client.publish(STATUS_TOPIC,"ERR SLOT OUT OF RANGE");
       return;
   }
 
@@ -139,7 +70,7 @@ void handle_lpic(char* args,WiFiClient* client){
     //FORCES CLEAR OF UPNG
     free(upng);
     upng = nullptr;
-    client->println("ERR FAILED TO DECODE");
+    mqtt_client.publish(STATUS_TOPIC,"ERR FAILED TO DECODE");
   }
   if(upng != nullptr) {
     free(upng);
@@ -147,7 +78,7 @@ void handle_lpic(char* args,WiFiClient* client){
   }
 
 }
-void handle_dtxt(char* args,WiFiClient* client){
+void handle_dtxt(char* args){
   char* arg_ptr=nullptr;
   int pos_x,pos_y,fsize,blen;
   char fcol[8];
@@ -155,31 +86,20 @@ void handle_dtxt(char* args,WiFiClient* client){
 
   arg_ptr=strtok(args,"~");
   if(arg_ptr == NULL){
-    client->println("ERR PARAMS INVALID");
+    mqtt_client.publish(STATUS_TOPIC,"ERR TEXT NOT PROVIDED");
     return;
   } 
 
   if(sscanf(arg_ptr,"%d %d %s %s %d %d",&pos_x,&pos_y,&fcol,&bcol,&fsize,&blen) < 1){
-    client->println("ERR PARAMS PARSING FAILED ");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PARAMS PARSING FAILED");
     return;
   }
-
-  if(pos_x < 0){
-      client->println("ERR POS_X is negative");
-      return;
-  }
-
-  if(pos_x < 0){
-        client->println("ERR POS_Y is negative");
-        return;
-  }
-
 
 
   if(fsize <= 1) dma_display.setFont(&Picopixel);
   arg_ptr = strtok(NULL,"~");
-   if(arg_ptr == NULL){
-    client->println("ERR PARAMS INVALID");
+  if(arg_ptr == NULL){
+    mqtt_client.publish(STATUS_TOPIC,"ERR TEXT PARSING FAILED");
     return;
   }
 
@@ -201,35 +121,35 @@ void handle_dtxt(char* args,WiFiClient* client){
 
 }
 
-void handle_upic(char* args,WiFiClient* client){
+void handle_upic(char* args){
 
   char* arg_ptr=nullptr;
   int slot,pic_len;
 
   arg_ptr=strtok(args,"~");
   if(arg_ptr == NULL){
-    client->println("ERR PARAMS INVALID");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PICTURE MISSING");
     return;
   } 
 
   if(sscanf(arg_ptr,"%d %d",&slot,&pic_len) < 1){
-    client->println("ERR PARAMS PARSING FAILED ");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PARAMS PARSING FAILED");
     return;
   }
 
   if(slot < 0 || slot > MAX_SLOTS){
-      client->println("ERR SLOT OUT OF RANGE");
+      mqtt_client.publish(STATUS_TOPIC,"ERR SLOT OUT OF RANGE");
       return;
   }
   //DATA HEADER IS MINIMUM 23 ASCII CHARS
   if(pic_len < 23) {
-    client->println("ERR LENGTH INVALID");
+    mqtt_client.publish(STATUS_TOPIC,"ERR LENGTH INVALID");
     return;
   }
 
   arg_ptr=strtok(NULL,"~");
   if(arg_ptr == NULL){
-     client->println("ERR No Picture Data present");
+     mqtt_client.publish(STATUS_TOPIC,"ERR PICTURE DATA PARSING");
      return;
   }
 
@@ -247,18 +167,19 @@ void handle_upic(char* args,WiFiClient* client){
   file.close();
 
   if(bytes_written > 0){
-    client->println("OK");
+    mqtt_client.publish(STATUS_TOPIC,"OK");
     return;
   }
   else{
-    client->println("ERR WRITING SLOT"+slot);
+    String slot_err = "ERR WRITING TO SLOT "+String(slot);
+    mqtt_client.publish(STATUS_TOPIC,slot_err.c_str());
     return;
   }
 
 }
 
 
-void handle_dpic( char* args,WiFiClient* client)
+void handle_dpic( char* args)
 {
   int pos_x,pos_y, blen;
 
@@ -266,33 +187,23 @@ void handle_dpic( char* args,WiFiClient* client)
 
   arg_ptr=strtok(args,"~");
   if(arg_ptr == NULL){
-    client->println("ERR PARAMS INVALID");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PICTURE DATA MISSING");
     return;
   } 
 
   if(sscanf(arg_ptr,"%d %d %d",&pos_x,&pos_y,&blen) < 1){
-    client->println("ERR PARAMS PARSING FAILED ");
-    return;
-  }
-
-  if(pos_x < 0){
-    client->println("ERR POS_X is negative");
-    return;
-  }
-
-  if(pos_y < 0){
-    client->println("ERR POS_Y is negative");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PARAMS PARSING FAILED");
     return;
   }
 
   if(blen < 1){
-    client->println("ERR BLEN is smaller than 1");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PICTURE LENGTH IS SMALLER THAN 1");
     return;
   }
 
   arg_ptr=strtok(NULL,"~");
   if(arg_ptr == NULL){
-    client->println("ERR PARAMS INVALID");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PARSING PICTURE DATA");
     return;
   } 
 
@@ -323,7 +234,7 @@ void handle_dpic( char* args,WiFiClient* client)
     //FORCES CLEAR OF UPNG
     free(upng);
     upng = nullptr;
-    client->println("ERR FAILED TO DECODE");
+    mqtt_client.publish(STATUS_TOPIC,"ERR PNG DECODING FAILED");
   }
 
   if(upng != nullptr) {
@@ -332,55 +243,122 @@ void handle_dpic( char* args,WiFiClient* client)
   }
 }
 
-void handle_commands(WiFiClient* client){
-    char buffer[1024];
-    //int read = client->readBytesUntil('\n',buffer,sizeof(buffer));
-    int read = client->readBytes(buffer,sizeof(buffer));
-    if(read < 1) return;
-    Serial.print("READ ");
-    Serial.println(read);
+void mqtt_callback(char* topic, byte* payload, unsigned int length) {
+  char* command = strrchr(topic, '/');
+  command++;
+  String str_cmd = String(command);
+  str_cmd.toUpperCase();
+  Serial.print("COMMAND: ");
+  Serial.println(str_cmd);
 
-    char* cmd_ptr = strtok(buffer," ");
-    if(strcmp(DPX_CMD,cmd_ptr) == 0) {
-        char* args_ptr=cmd_ptr+4;
-        handle_dpx(args_ptr,client);
-    }
+  if(str_cmd == DPX_CMD) {
+        handle_dpx((char *)payload);
+  }
 
-    if(strcmp(DPIC_CMD,cmd_ptr) == 0) {
-       char* args_ptr=cmd_ptr+5;
-       handle_dpic(args_ptr,client);
-    }
+  if(str_cmd == DPIC_CMD) {
+       handle_dpic((char *)payload);
+  }
 
-    if(strcmp(UPIC_CMD,cmd_ptr) == 0) {
-       char* args_ptr=cmd_ptr+5;
-       handle_upic(args_ptr,client);
-    }
+  if(str_cmd == UPIC_CMD) {
+       handle_upic((char *)payload);
+  }
 
-    if(strcmp(LPIC_CMD,cmd_ptr) == 0) {
-       char* args_ptr=cmd_ptr+5;
-       handle_lpic(args_ptr,client);
-    }
+  if(str_cmd == LPIC_CMD) {
+       handle_lpic((char *)payload);
+  }
+  if(str_cmd == DTXT_CMD) {
+       handle_dtxt((char *)payload);
+  }
 
-    if(strcmp(DTXT_CMD,cmd_ptr) == 0) {
-       char* args_ptr=cmd_ptr+5;
-       handle_dtxt(args_ptr,client);
-    }
 }
+
+
+
+
+void wifi_setup()
+{
+    delay(10);
+    Serial.println();
+    Serial.print("Connecting to ");
+    Serial.println(SSID);
+ 
+    WiFi.begin(SSID, PSK);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+ 
+    Serial.println("");
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+}
+
+void mqtt_setup(){
+  mqtt_client.setServer(MQTT_HOST,MQTT_PORT);
+  mqtt_client.setCallback(mqtt_callback);
+  sprintf(SUBSCRIBE_CMND,"%s/cmnd/+",MQTT_PREFIX);
+  sprintf(STATUS_TOPIC,"%s/status",MQTT_PREFIX);
+}
+
+void mqtt_reconnect(){
+
+  bool connected=false;
+
+  while(!connected)
+  {
+  Serial.println("Try to connect to MQTT");
+  #ifndef MQTT_PASSWORD_AUTH
+    connected = mqtt_client.connect(MQTT_IDENT)
+  #else
+    connected = mqtt_client.connect(MQTT_IDENT,MQTT_USER,MQTT_PASSWORD);
+  #endif
+    if(!connected) delay(1000);
+  }
+  Serial.println("Connected to MQTT");
+
+  mqtt_client.subscribe(SUBSCRIBE_CMND);
+  Serial.print("Subscribed: ");
+  Serial.println(SUBSCRIBE_CMND);
+
+}
+
+void display_setup(){
+    dma_display.begin(); 
+    
+  // fix the screen with green
+    dma_display.fillRect(0, 0, dma_display.width(), dma_display.height(), dma_display.color444(255, 0, 0));
+    delay(500);
+
+
+    // draw a box in yellow
+    dma_display.fillRect(0, 0, dma_display.width(), dma_display.height(), dma_display.color444(0, 255, 0));
+    delay(500);
+
+    dma_display.fillRect(0, 0, dma_display.width(), dma_display.height(), dma_display.color444(0, 0, 255));
+    delay(500);
+}
+
+void setup() {
+  Serial.begin(115200);
+  wifi_setup();
+
+   if(!SPIFFS.begin(true)){
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
+  mqtt_setup();
+  mqtt_reconnect();
+  display_setup();
+  
+ 
+}
+
 
 void loop() {
-  WiFiClient client = server.available();
-  if (client){
-    Serial.println("Client connected");
-    while (client.connected()){
-        if (client.available())
-        {
-           Serial.println("Client sending data");
-              handle_commands(&client);
-        }
-      
-    }
-    client.stop();
-    Serial.println("[Client disconnected]");
+  if (!mqtt_client.connected()) {
+    mqtt_reconnect();
   }
-  
+  mqtt_client.loop();
 }
+
