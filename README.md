@@ -20,4 +20,6 @@ UPLOAD PICTURE | {PREFIX}/cmnd/upic | {SLOT} {LEN}~{base64data} | 0 512~data:ima
 LOAD PICTURE FROM SPIFFS | {PREFIX}/cmnd/lpic | {SLOT} {POSX} {POSY} | 1 0 0
 DRAW TEXT | {PREFIX}/cmnd/dtxt | {POSX} {POSY} {FORGROUND_COLOR} {BACKGROUND_COLOR} {SIZE} {LEN}~{PAYLOAD} | 0 10 #00FF00 #000000 1 5~Hello | Draws a text to the screen
 
+## Status
 
+Subscribe to {PREFIX}/status to get command feedback
